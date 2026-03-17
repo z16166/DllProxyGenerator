@@ -12,10 +12,20 @@ Automated tool to generate Proxy DLL source code (CPP, DEF, and x64 ASM) from an
 
 ## Build Generated Proxy
 
-Use CMake to build the generated project:
+Use CMake to build the generated project. **Architecture must match the original DLL**:
+
+### For 64-bit (x64) DLLs:
 ```bash
 mkdir build && cd build
 cmake ..
 cmake --build . --config Release
 ```
-The generated CMake project automatically handles MASM for x64 and static CRT linking.
+
+### For 32-bit (x86) DLLs:
+```bash
+mkdir build && cd build
+cmake -A Win32 ..
+cmake --build . --config Release
+```
+
+The generated CMake project automatically handles MASM for x64, static CRT linking, and PDB generation. It also includes architecture safeguards to ensure correct toolchain usage.
