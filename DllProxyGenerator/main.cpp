@@ -6,10 +6,11 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <unordered_map>
 
 #pragma comment(lib, "imagehlp.lib")
 
-namespace fs = std::filesystem;
+
 
 class ScopedHandle {
   HANDLE handle;
@@ -82,12 +83,30 @@ std::string LoadTemplate(const std::wstring &templateName) {
   return buffer.str();
 }
 
-void ReplaceAll(std::string &str, const std::string &from, const std::string &to) {
-  std::size_t start_pos = 0;
-  while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
-    str.replace(start_pos, from.length(), to);
-    start_pos += to.length();
+
+
+std::string ReplaceTemplate(const std::string &templateStr,
+                            const std::unordered_map<std::string, std::string> &replacements) {
+  std::string result;
+  result.reserve(templateStr.length());
+
+  for (std::size_t i = 0; i < templateStr.length();) {
+    if (i + 1 < templateStr.length() && templateStr[i] == '{' && templateStr[i + 1] == '{') {
+      std::size_t endPos = templateStr.find("}}", i + 2);
+      if (endPos != std::string::npos) {
+        std::string key = templateStr.substr(i + 2, endPos - (i + 2));
+        auto it = replacements.find(key);
+        if (it != replacements.end()) {
+          result += it->second;
+          i = endPos + 2;
+          continue;
+        }
+      }
+    }
+    result += templateStr[i];
+    ++i;
   }
+  return result;
 }
 
 std::string ToAnsiString(const std::wstring &wstr) {
@@ -166,15 +185,12 @@ void GenerateDEF(const std::wstring &baseDllName, const std::vector<std::string>
 )";
 
   for (std::size_t i = 0; i < exportedNames.size(); i++) {
-    std::string exportLine = exportLineTemplate;
-    ReplaceAll(exportLine, "{{FUNC_NAME}}", exportedNames[i]);
-    ReplaceAll(exportLine, "{{ORDINAL}}", std::to_string(i + 1));
-    exports += exportLine;
+    exports += ReplaceTemplate(exportLineTemplate,
+                               {{"FUNC_NAME", exportedNames[i]}, {"ORDINAL", std::to_string(i + 1)}});
   }
 
   std::string baseDllAnsiName = ToAnsiString(baseDllName);
-  ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
-  ReplaceAll(content, "{{EXPORTS}}", exports);
+  content = ReplaceTemplate(content, {{"DLL_NAME", baseDllAnsiName}, {"EXPORTS", exports}});
 
   std::ofstream(baseDllName + L".def") << content;
 }
@@ -202,27 +218,23 @@ void GenerateMainCPP(const std::wstring &baseDllName, const std::vector<std::str
 )";
 
   for (const auto &funcName : exportedNames) {
-    std::string memberCode = memberTemplate;
-    ReplaceAll(memberCode, "{{FUNC_NAME}}", funcName);
-    members += memberCode;
+    members += ReplaceTemplate(memberTemplate, {{"FUNC_NAME", funcName}});
 
-    std::string exportCode = exportTemplate;
+    std::string exportCodeTemplate = exportTemplate;
+    std::unordered_map<std::string, std::string> exportReplacements = {{"FUNC_NAME", funcName}};
     if (fileType != IMAGE_FILE_MACHINE_AMD64) {
-      ReplaceAll(exportCode, "{{DLL_NAME}}", baseDllAnsiName);
+      exportReplacements["DLL_NAME"] = baseDllAnsiName;
     }
-    ReplaceAll(exportCode, "{{FUNC_NAME}}", funcName);
-    exports += exportCode;
+    exports += ReplaceTemplate(exportCodeTemplate, exportReplacements);
 
-    std::string callCode = callTemplate;
-    ReplaceAll(callCode, "{{DLL_NAME}}", baseDllAnsiName);
-    ReplaceAll(callCode, "{{FUNC_NAME}}", funcName);
-    calls += callCode;
+    calls += ReplaceTemplate(callTemplate, {{"DLL_NAME", baseDllAnsiName}, {"FUNC_NAME", funcName}});
   }
 
-  ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
-  ReplaceAll(content, "{{STRUCT_MEMBERS}}", members);
-  ReplaceAll(content, "{{EXPORT_FUNCTIONS}}", exports);
-  ReplaceAll(content, "{{GET_PROC_ADDRESS_CALLS}}", calls);
+  content = ReplaceTemplate(content,
+                             {{"DLL_NAME", baseDllAnsiName},
+                              {"STRUCT_MEMBERS", members},
+                              {"EXPORT_FUNCTIONS", exports},
+                              {"GET_PROC_ADDRESS_CALLS", calls}});
 
   std::ofstream(baseDllName + L".cpp") << content;
 }
@@ -238,11 +250,10 @@ Fake{{FUNC_NAME}} endp
 )";
 
   for (std::size_t i = 0; i < exportedNames.size(); ++i) {
-    std::string funcCode = asmFuncTemplate;
-    ReplaceAll(funcCode, "{{FUNC_NAME}}", exportedNames[i]);
-    ReplaceAll(funcCode, "{{DLL_NAME}}", baseDllAnsiName);
-    ReplaceAll(funcCode, "{{OFFSET}}", std::to_string(8 + i * 8));
-    asmFunctions += funcCode;
+    asmFunctions += ReplaceTemplate(asmFuncTemplate,
+                                    {{"FUNC_NAME", exportedNames[i]},
+                                     {"DLL_NAME", baseDllAnsiName},
+                                     {"OFFSET", std::to_string(8 + i * 8)}});
   }
 
   std::string content = R"(.data
@@ -254,8 +265,7 @@ extern {{DLL_NAME}} : qword
 end
 )";
 
-  ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
-  ReplaceAll(content, "{{ASM_FUNCTIONS}}", asmFunctions);
+  content = ReplaceTemplate(content, {{"DLL_NAME", baseDllAnsiName}, {"ASM_FUNCTIONS", asmFunctions}});
 
   std::ofstream(baseDllName + L".asm") << content;
 }
@@ -279,9 +289,10 @@ void GenerateCMake(const std::wstring &baseDllName, WORD fileType) {
   }
 
   std::string baseDllAnsiName = ToAnsiString(baseDllName);
-  ReplaceAll(content, "{{ARCH_CHECK}}", archCheck);
-  ReplaceAll(content, "{{ARCH_SPECIFIC_SETTING}}", archSetting);
-  ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
+  content = ReplaceTemplate(content,
+                             {{"ARCH_CHECK", archCheck},
+                              {"ARCH_SPECIFIC_SETTING", archSetting},
+                              {"DLL_NAME", baseDllAnsiName}});
 
   std::ofstream(L"CMakeLists.txt") << content;
 }
@@ -300,7 +311,7 @@ int wmain(int argc, wchar_t *argv[]) {
     fileType = ntHeaders.FileHeader.Machine;
   }
 
-  std::wstring baseDllName = fs::path(args[1]).stem().wstring();
+  std::wstring baseDllName = std::filesystem::path(args[1]).stem().wstring();
 
   ListDLLFunctions(args[1], exportedNames);
 
