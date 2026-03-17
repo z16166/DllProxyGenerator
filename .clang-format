@@ -1,0 +1,5 @@
+BasedOnStyle: LLVM
+ColumnLimit: 110
+IncludeBlocks: Preserve
+SortIncludes: Never
+AlignArrayOfStructures: Left

@@ -1,0 +1,30 @@
+#include <windows.h>
+
+struct {{DLL_NAME}}_dll {
+    HMODULE dllHandle;
+{{STRUCT_MEMBERS}}
+} {{DLL_NAME}};
+
+{{EXPORT_FUNCTIONS}}
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
+    WCHAR path[MAX_PATH];
+    switch (ul_reason_for_call) {
+        case DLL_PROCESS_ATTACH:
+            GetSystemDirectoryW(path, MAX_PATH);
+            lstrcatW(path, L"\\{{DLL_NAME}}.dll");
+            {{DLL_NAME}}.dllHandle = LoadLibraryW(path);
+            if (!{{DLL_NAME}}.dllHandle) {
+                MessageBoxW(0, L"Cannot load original {{DLL_NAME}}.dll library", L"Proxy", MB_ICONERROR);
+                ExitProcess(0);
+            }
+
+{{GET_PROC_ADDRESS_CALLS}}
+            break;
+        case DLL_PROCESS_DETACH:
+            FreeLibrary({{DLL_NAME}}.dllHandle);
+            break;
+    }
+
+    return TRUE;
+}

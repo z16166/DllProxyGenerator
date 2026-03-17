@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.10)
+project({{DLL_NAME}}_proxy)
+
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    enable_language(ASM_MASM)
+    set(ASM_SOURCES {{DLL_NAME}}.asm)
+else()
+    set(ASM_SOURCES "")
+endif()
+
+# Since we use __declspec(naked) for x86 and external declarations for x64, 
+# we need to ensure the compiler understands our calling conventions.
+add_library(${PROJECT_NAME} SHARED
+    {{DLL_NAME}}.cpp
+    ${ASM_SOURCES}
+)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES 
+    OUTPUT_NAME "{{DLL_NAME}}"
+    PREFIX ""
+    LINK_FLAGS "/DEF:\"${CMAKE_CURRENT_SOURCE_DIR}/{{DLL_NAME}}.def\""
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+)
