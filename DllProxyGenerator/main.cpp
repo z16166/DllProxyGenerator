@@ -1,0 +1,309 @@
+#include <iostream>
+#include <Windows.h>
+#include <imagehlp.h>
+#include <vector>
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <filesystem>
+
+#pragma comment(lib, "imagehlp.lib")
+
+namespace fs = std::filesystem;
+
+class ScopedHandle {
+  HANDLE handle;
+
+public:
+  explicit ScopedHandle(HANDLE h) : handle(h) {}
+  ~ScopedHandle() {
+    if (handle != INVALID_HANDLE_VALUE && handle != nullptr)
+      CloseHandle(handle);
+  }
+  operator HANDLE() const { return handle; }
+  bool IsValid() const { return handle != INVALID_HANDLE_VALUE && handle != nullptr; }
+};
+
+class ScopedView {
+  void *ptr;
+
+public:
+  explicit ScopedView(void *p) : ptr(p) {}
+  ~ScopedView() {
+    if (ptr)
+      UnmapViewOfFile(ptr);
+  }
+  operator void *() const { return ptr; }
+  bool IsValid() const { return ptr != nullptr; }
+};
+
+class ScopedLoadedImage {
+  HANDLE fileHandle;
+  HANDLE mappingHandle;
+  void *baseAddress;
+
+public:
+  explicit ScopedLoadedImage(const std::wstring &dllPath)
+      : fileHandle(INVALID_HANDLE_VALUE), mappingHandle(nullptr), baseAddress(nullptr) {
+    fileHandle = CreateFileW(dllPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                             FILE_ATTRIBUTE_NORMAL, 0);
+    if (fileHandle != INVALID_HANDLE_VALUE) {
+      mappingHandle = CreateFileMapping(fileHandle, nullptr, PAGE_READONLY, 0, 0, nullptr);
+      if (mappingHandle) {
+        baseAddress = MapViewOfFile(mappingHandle, FILE_MAP_READ, 0, 0, 0);
+      }
+    }
+  }
+
+  ~ScopedLoadedImage() {
+    if (baseAddress)
+      UnmapViewOfFile(baseAddress);
+
+    if (mappingHandle)
+      CloseHandle(mappingHandle);
+
+    if (fileHandle != INVALID_HANDLE_VALUE)
+      CloseHandle(fileHandle);
+  }
+
+  bool IsValid() const { return baseAddress != nullptr; }
+  void *GetBase() const { return baseAddress; }
+};
+
+std::string LoadTemplate(const std::wstring &templateName) {
+  std::ifstream file(L"templates/" + templateName);
+  if (!file.is_open()) {
+    std::wcerr << L"Failed to open template: " << templateName << std::endl;
+    return "";
+  }
+
+  std::stringstream buffer;
+  buffer << file.rdbuf();
+  return buffer.str();
+}
+
+void ReplaceAll(std::string &str, const std::string &from, const std::string &to) {
+  std::size_t start_pos = 0;
+  while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
+    str.replace(start_pos, from.length(), to);
+    start_pos += to.length();
+  }
+}
+
+std::string ToAnsiString(const std::wstring &wstr) {
+  std::string result;
+  result.reserve(wstr.length());
+  for (wchar_t wc : wstr) {
+    result += static_cast<char>(wc);
+  }
+  return result;
+}
+
+bool GetImageFileHeaders(const std::wstring &dllPath, IMAGE_NT_HEADERS &ntHeaders) {
+  ScopedHandle fileHandle(CreateFileW(dllPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                      FILE_ATTRIBUTE_NORMAL, 0));
+  if (!fileHandle.IsValid())
+    return false;
+
+  ScopedHandle imageHandle(CreateFileMapping(fileHandle, nullptr, PAGE_READONLY, 0, 0, nullptr));
+  if (!imageHandle.IsValid())
+    return false;
+
+  ScopedView imagePtr(MapViewOfFile(imageHandle, FILE_MAP_READ, 0, 0, 0));
+  if (!imagePtr.IsValid())
+    return false;
+
+  PIMAGE_NT_HEADERS ntHeaderPtr = ImageNtHeader(imagePtr);
+  if (ntHeaderPtr == nullptr)
+    return false;
+
+  ntHeaders = *ntHeaderPtr;
+  return true;
+}
+
+void ListDLLFunctions(const std::wstring &dllPath, std::vector<std::string> &exportedNames) {
+  exportedNames.clear();
+
+  ScopedLoadedImage loadedImage(dllPath);
+  if (!loadedImage.IsValid()) {
+    return;
+  }
+
+  unsigned long directorySize;
+  PIMAGE_EXPORT_DIRECTORY exportDirectory = (PIMAGE_EXPORT_DIRECTORY)ImageDirectoryEntryToData(
+      loadedImage.GetBase(), false, IMAGE_DIRECTORY_ENTRY_EXPORT, &directorySize);
+
+  if (exportDirectory == nullptr) {
+    return;
+  }
+
+  PIMAGE_NT_HEADERS ntHeaders = ImageNtHeader(loadedImage.GetBase());
+  if (ntHeaders == nullptr) {
+    return;
+  }
+
+  DWORD *nameRVAs =
+      (DWORD *)ImageRvaToVa(ntHeaders, loadedImage.GetBase(), exportDirectory->AddressOfNames, nullptr);
+  if (nameRVAs == nullptr) {
+    return;
+  }
+
+  for (std::size_t i = 0; i < exportDirectory->NumberOfNames; i++) {
+    const char *funcName = (const char *)ImageRvaToVa(ntHeaders, loadedImage.GetBase(), nameRVAs[i], nullptr);
+    if (funcName) {
+      exportedNames.push_back(funcName);
+    }
+  }
+}
+
+void GenerateDEF(const std::wstring &baseDllName, const std::vector<std::string> &exportedNames) {
+  std::string content = LoadTemplate(L"export_def.template");
+  if (content.empty())
+    return;
+
+  std::string exports;
+  const std::string exportLineTemplate = R"(  {{FUNC_NAME}}=Fake{{FUNC_NAME}} @{{ORDINAL}}
+)";
+
+  for (std::size_t i = 0; i < exportedNames.size(); i++) {
+    std::string exportLine = exportLineTemplate;
+    ReplaceAll(exportLine, "{{FUNC_NAME}}", exportedNames[i]);
+    ReplaceAll(exportLine, "{{ORDINAL}}", std::to_string(i + 1));
+    exports += exportLine;
+  }
+
+  std::string baseDllAnsiName = ToAnsiString(baseDllName);
+  ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
+  ReplaceAll(content, "{{EXPORTS}}", exports);
+
+  std::ofstream(baseDllName + L".def") << content;
+}
+
+void GenerateMainCPP(const std::wstring &baseDllName, const std::vector<std::string> &exportedNames, WORD fileType) {
+  std::string content = LoadTemplate(L"main_cpp.template");
+  if (content.empty())
+    return;
+
+  std::string baseDllAnsiName = ToAnsiString(baseDllName);
+  std::string members, exports, calls;
+
+  const std::string memberTemplate = R"(    FARPROC Orignal{{FUNC_NAME}};
+)";
+
+  const std::string exportTemplate =
+      (fileType == IMAGE_FILE_MACHINE_AMD64)
+          ? R"(extern "C" void Fake{{FUNC_NAME}}();
+)"
+          : R"(__declspec(naked) void Fake{{FUNC_NAME}}() { _asm { jmp[{{DLL_NAME}}.Orignal{{FUNC_NAME}}] } }
+)";
+
+  const std::string callTemplate =
+      R"(            {{DLL_NAME}}.Orignal{{FUNC_NAME}} = GetProcAddress({{DLL_NAME}}.dllHandle, "{{FUNC_NAME}}");
+)";
+
+  for (const auto &funcName : exportedNames) {
+    std::string memberCode = memberTemplate;
+    ReplaceAll(memberCode, "{{FUNC_NAME}}", funcName);
+    members += memberCode;
+
+    std::string exportCode = exportTemplate;
+    if (fileType != IMAGE_FILE_MACHINE_AMD64) {
+      ReplaceAll(exportCode, "{{DLL_NAME}}", baseDllAnsiName);
+    }
+    ReplaceAll(exportCode, "{{FUNC_NAME}}", funcName);
+    exports += exportCode;
+
+    std::string callCode = callTemplate;
+    ReplaceAll(callCode, "{{DLL_NAME}}", baseDllAnsiName);
+    ReplaceAll(callCode, "{{FUNC_NAME}}", funcName);
+    calls += callCode;
+  }
+
+  ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
+  ReplaceAll(content, "{{STRUCT_MEMBERS}}", members);
+  ReplaceAll(content, "{{EXPORT_FUNCTIONS}}", exports);
+  ReplaceAll(content, "{{GET_PROC_ADDRESS_CALLS}}", calls);
+
+  std::ofstream(baseDllName + L".cpp") << content;
+}
+
+void GenerateASM(const std::wstring &baseDllName, const std::vector<std::string> &exportedNames) {
+  std::string baseDllAnsiName = ToAnsiString(baseDllName);
+  std::string asmFunctions;
+
+  const std::string asmFuncTemplate = R"(Fake{{FUNC_NAME}} proc
+  jmp qword ptr [{{DLL_NAME}} + {{OFFSET}}]
+Fake{{FUNC_NAME}} endp
+
+)";
+
+  for (std::size_t i = 0; i < exportedNames.size(); ++i) {
+    std::string funcCode = asmFuncTemplate;
+    ReplaceAll(funcCode, "{{FUNC_NAME}}", exportedNames[i]);
+    ReplaceAll(funcCode, "{{DLL_NAME}}", baseDllAnsiName);
+    ReplaceAll(funcCode, "{{OFFSET}}", std::to_string(8 + i * 8));
+    asmFunctions += funcCode;
+  }
+
+  std::string content = R"(.data
+extern {{DLL_NAME}} : qword
+
+.code
+
+{{ASM_FUNCTIONS}}
+end
+)";
+
+  ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
+  ReplaceAll(content, "{{ASM_FUNCTIONS}}", asmFunctions);
+
+  std::ofstream(baseDllName + L".asm") << content;
+}
+
+void GenerateCMake(const std::wstring &baseDllName, WORD fileType) {
+  std::string content = LoadTemplate(L"cmake_lists.template");
+  if (content.empty())
+    return;
+
+  std::string archSetting;
+  if (fileType == IMAGE_FILE_MACHINE_AMD64) {
+    archSetting = "enable_language(ASM_MASM)\nset(ASM_SOURCES {{DLL_NAME}}.asm)";
+  } else {
+    archSetting = "set(ASM_SOURCES \"\")";
+  }
+
+  std::string baseDllAnsiName = ToAnsiString(baseDllName);
+  ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
+  ReplaceAll(content, "{{ARCH_SPECIFIC_SETTING}}", archSetting);
+
+  std::ofstream(L"CMakeLists.txt") << content;
+}
+
+int wmain(int argc, wchar_t *argv[]) {
+  if (argc < 2)
+    return 1;
+
+  std::vector<std::wstring> args(argv, argv + argc);
+
+  WORD fileType = 0;
+  std::vector<std::string> exportedNames;
+
+  IMAGE_NT_HEADERS ntHeaders;
+  if (GetImageFileHeaders(args[1], ntHeaders)) {
+    fileType = ntHeaders.FileHeader.Machine;
+  }
+
+  std::wstring baseDllName = fs::path(args[1]).stem().wstring();
+
+  ListDLLFunctions(args[1], exportedNames);
+
+  GenerateDEF(baseDllName, exportedNames);
+  GenerateMainCPP(baseDllName, exportedNames, fileType);
+
+  if (fileType == IMAGE_FILE_MACHINE_AMD64)
+    GenerateASM(baseDllName, exportedNames);
+
+  GenerateCMake(baseDllName, fileType);
+
+  return 0;
+}

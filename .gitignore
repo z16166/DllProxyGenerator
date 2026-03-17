@@ -36,6 +36,8 @@ ipch/
 
 # Generated Proxy Files (avoid polluting the source repo with example outputs)
 DllProxyGenerator/*.def
-DllProxyGenerator/*.cpp
 DllProxyGenerator/*.asm
 DllProxyGenerator/CMakeLists.txt
+# Only ignore generated .cpp files, not the source main.cpp
+DllProxyGenerator/*.cpp
+!DllProxyGenerator/main.cpp
