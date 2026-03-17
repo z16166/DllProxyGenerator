@@ -46,7 +46,7 @@ public:
   explicit ScopedLoadedImage(const std::wstring &dllPath)
       : fileHandle(INVALID_HANDLE_VALUE), mappingHandle(nullptr), baseAddress(nullptr) {
     fileHandle = CreateFileW(dllPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                             FILE_ATTRIBUTE_NORMAL, 0);
+                             FILE_ATTRIBUTE_NORMAL, nullptr);
     if (fileHandle != INVALID_HANDLE_VALUE) {
       mappingHandle = CreateFileMapping(fileHandle, nullptr, PAGE_READONLY, 0, 0, nullptr);
       if (mappingHandle) {
@@ -101,7 +101,7 @@ std::string ToAnsiString(const std::wstring &wstr) {
 
 bool GetImageFileHeaders(const std::wstring &dllPath, IMAGE_NT_HEADERS &ntHeaders) {
   ScopedHandle fileHandle(CreateFileW(dllPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                                      FILE_ATTRIBUTE_NORMAL, 0));
+                                      FILE_ATTRIBUTE_NORMAL, nullptr));
   if (!fileHandle.IsValid())
     return false;
 

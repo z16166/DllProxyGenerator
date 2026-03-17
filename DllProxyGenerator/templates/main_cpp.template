@@ -17,7 +17,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             lstrcatW(path, L"\\{{DLL_NAME}}.dll");
             {{DLL_NAME}}.dllHandle = LoadLibraryW(path);
             if (!{{DLL_NAME}}.dllHandle) {
-                MessageBoxW(0, L"Cannot load original {{DLL_NAME}}.dll library", L"Proxy", MB_ICONERROR);
+                MessageBoxW(nullptr, L"Cannot load original {{DLL_NAME}}.dll library", L"Proxy", MB_ICONERROR);
                 ExitProcess(0);
             }
 
