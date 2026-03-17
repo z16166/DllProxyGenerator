@@ -1,9 +1,11 @@
 #include <windows.h>
 
+extern "C" {
 struct {{DLL_NAME}}_dll {
     HMODULE dllHandle;
 {{STRUCT_MEMBERS}}
 } {{DLL_NAME}};
+}
 
 {{EXPORT_FUNCTIONS}}
 
