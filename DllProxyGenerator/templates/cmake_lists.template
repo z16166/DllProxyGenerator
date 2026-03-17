@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.10)
 project({{DLL_NAME}}_proxy)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+{{ARCH_CHECK}}
 {{ARCH_SPECIFIC_SETTING}}
 
 # Since we use __declspec(naked) for x86 and external declarations for x64, 

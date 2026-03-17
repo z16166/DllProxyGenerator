@@ -5,9 +5,9 @@ struct {{DLL_NAME}}_dll {
     HMODULE dllHandle;
 {{STRUCT_MEMBERS}}
 } {{DLL_NAME}};
-}
 
 {{EXPORT_FUNCTIONS}}
+}
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     WCHAR path[MAX_PATH];

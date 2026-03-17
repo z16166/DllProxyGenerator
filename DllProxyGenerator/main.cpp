@@ -265,14 +265,21 @@ void GenerateCMake(const std::wstring &baseDllName, WORD fileType) {
   if (content.empty())
     return;
 
-  std::string archSetting;
+  std::string archSetting, archCheck;
   if (fileType == IMAGE_FILE_MACHINE_AMD64) {
+    archCheck = "if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)\n"
+                "    message(FATAL_ERROR \"This project is for 64-bit (x64) and must be built with an x64 generator.\")\n"
+                "endif()";
     archSetting = "enable_language(ASM_MASM)\nset(ASM_SOURCES {{DLL_NAME}}.asm)";
   } else {
+    archCheck = "if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)\n"
+                "    message(FATAL_ERROR \"This project is for 32-bit (x86) and must be built with a 32-bit generator. Use 'cmake -A Win32 ..'\")\n"
+                "endif()";
     archSetting = "set(ASM_SOURCES \"\")";
   }
 
   std::string baseDllAnsiName = ToAnsiString(baseDllName);
+  ReplaceAll(content, "{{ARCH_CHECK}}", archCheck);
   ReplaceAll(content, "{{ARCH_SPECIFIC_SETTING}}", archSetting);
   ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
 
