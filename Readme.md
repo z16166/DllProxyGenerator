@@ -29,3 +29,8 @@ cmake --build . --config Release
 ```
 
 The generated CMake project automatically handles MASM for x64, static CRT linking, and PDB generation. It also includes architecture safeguards to ensure correct toolchain usage.
+
+## Credits
+
+本项目基于如下项目修改：
+https://github.com/maluramichael/dll-proxy-generator
