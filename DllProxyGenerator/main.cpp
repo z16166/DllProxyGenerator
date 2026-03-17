@@ -273,8 +273,8 @@ void GenerateCMake(const std::wstring &baseDllName, WORD fileType) {
   }
 
   std::string baseDllAnsiName = ToAnsiString(baseDllName);
-  ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
   ReplaceAll(content, "{{ARCH_SPECIFIC_SETTING}}", archSetting);
+  ReplaceAll(content, "{{DLL_NAME}}", baseDllAnsiName);
 
   std::ofstream(L"CMakeLists.txt") << content;
 }
