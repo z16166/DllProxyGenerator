@@ -1,9 +1,12 @@
-# Visual Studio
+# Visual Studio intermediate and temporary files
 .vs/
+[Xx]64/
+[Dd]ebug/
+[Rr]elease/
+obj/
+bin/
 out/
 build/
-bin/
-obj/
 *.user
 *.aps
 *.bak
@@ -15,12 +18,21 @@ obj/
 *.opensdf
 *.vc.db
 *.sln.docwidgets
+*.tlog
+*.log
+*.lastbuildstate
+ipch/
+*.pch
+*.ipch
+*.iobj
+*.ipdb
 
 # Compiled binaries
 *.exe
 *.dll
 *.lib
 *.exp
+*.ilk
 
 # Generated Proxy Files (avoid polluting the source repo with example outputs)
 DllProxyGenerator/*.def
